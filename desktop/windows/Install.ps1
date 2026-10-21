@@ -78,6 +78,17 @@ if (-not (Test-Path $npmCmd)) { throw 'A Node.js telepites hianyos (npm.cmd nem 
 $env:PATH = $nodeDir + ';' + $env:PATH
 RunChecked -exe $nodeExe -arguments @('--version') -working $repo
 
+# The official LibreChat npm install guide pins npm 11.16.0.
+# Node 24.16.0 ships npm 11.13.0: using the bundled one is a version mismatch.
+$npmPrefix = Join-Path $localRoot 'runtime\npm-11.16'
+$npmCli = Join-Path $npmPrefix 'node_modules\npm\bin\npm-cli.js'
+if (-not (Test-Path $npmCli)) {
+  Step '1b/5: LibreChat-hez elvart npm 11.16.0 telepitese'
+  RunChecked -exe $npmCmd -arguments @('install', '--prefix', $npmPrefix, '--no-audit', '--no-fund', '--no-save', 'npm@11.16.0') -working $repo
+}
+if (-not (Test-Path $npmCli)) { throw 'A rögzített npm 11.16.0 telepitese sikertelen.' }
+RunChecked -exe $nodeExe -arguments @($npmCli, '--version') -working $repo
+
 Step '2/5: Helyi konfiguracio (egyedi titkos kulcsok, csak localhost)'
 $script:envFile = Join-Path $repo '.env'
 if (-not (Test-Path $script:envFile)) {
@@ -96,15 +107,15 @@ Set-DotEnv 'SESSION_COOKIE_SECURE' 'false'
 # MONGO_URI and PORT are assigned dynamically by Electron on each launch.
 
 Step '3/5: LibreChat fuggosegek telepitese'
-RunChecked -exe $npmCmd -arguments @('ci', '--no-audit', '--no-fund') -working $repo
+RunChecked -exe $nodeExe -arguments @($npmCli, 'ci', '--no-audit', '--no-fund') -working $repo
 Step '4/5: LibreChat frontend es kozos csomagok forditasa'
 $env:NODE_OPTIONS = '--max-old-space-size=8192'
-RunChecked -exe $npmCmd -arguments @('run', 'frontend') -working $repo
+RunChecked -exe $nodeExe -arguments @($npmCli, 'run', 'frontend') -working $repo
 if (-not (Test-Path (Join-Path $repo 'client\dist\index.html'))) { throw 'A LibreChat frontend build nem jott letre.' }
 
 Step '5/5: Electron + helyi MongoDB motor telepitese'
 $desktopDir = Join-Path $repo 'desktop'
-RunChecked -exe $npmCmd -arguments @('install', '--no-audit', '--no-fund', '--prefix', $desktopDir) -working $repo
+RunChecked -exe $nodeExe -arguments @($npmCli, 'install', '--no-audit', '--no-fund', '--prefix', $desktopDir) -working $repo
 $electronExe = Join-Path $desktopDir 'node_modules\electron\dist\electron.exe'
 if (-not (Test-Path $electronExe)) { throw 'Az Electron binaris hianyzik a telepites utan.' }
 
