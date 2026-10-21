@@ -18,7 +18,7 @@ function New-Secret([int]$length = 32) {
   return [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
 }
 function Save-Utf8NoBom([string]$path, [string]$value) {
-  [IO.File]::WriteAllText($path, $value, (New-Object Text.UTF8Encoding($false)))
+  [IO.File]::WriteAllText($path, $value, ([System.Text.UTF8Encoding]::new($false)))
 }
 function Set-DotEnv([string]$name, [string]$value) {
   $body = [IO.File]::ReadAllText($script:envFile)
