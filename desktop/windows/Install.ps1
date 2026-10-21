@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-function Step([string]$msg) { Write-Host "`n>>> $msg" -ForegroundColor Cyan }
+function Step([string]$msg) { $script:InstallStage = $msg; Write-Host "`n>>> $msg" -ForegroundColor Cyan }
 function New-Secret([int]$length = 32) {
   $bytes = New-Object byte[] $length
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -38,6 +38,13 @@ function RunChecked([string]$exe, [string[]]$arguments, [string]$working) {
   } finally { Pop-Location }
 }
 
+$script:InstallStage = 'Telepites elokeszitese'
+$script:InstallLogs = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop\data\logs'
+New-Item -ItemType Directory -Force -Path $script:InstallLogs | Out-Null
+$script:InstallLog = Join-Path $script:InstallLogs ('install-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+$script:InstallError = Join-Path $script:InstallLogs 'install-last-error.txt'
+Start-Transcript -Path $script:InstallLog -Append | Out-Null
+try {
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Windows 10/11 rendszer szukseges.' }
 if (-not [Environment]::Is64BitOperatingSystem) { throw 'Ez a telepito csak 64 bites Windowson mukodik.' }
 
@@ -120,3 +127,24 @@ Write-Host 'A MongoDB adatok es a naplok a LocalAppData\LibreChatDesktop\data ma
 Write-Host 'Az AI szolgaltatokhoz szukseges kulcsokat kulon kell megadni a LibreChat beallitasainal.'
 Step 'Alkalmazas inditasa'
 Start-Process -FilePath $electronExe -ArgumentList ('"' + $desktopDir + '"') -WorkingDirectory $desktopDir
+
+  if (Test-Path $script:InstallError) { Remove-Item -Force $script:InstallError }
+} catch {
+  $message = $_.Exception.Message
+  $errorText = @(
+    ('Idopont: ' + (Get-Date).ToString('s'))
+    ('Lepes: ' + $script:InstallStage)
+    ('Hiba: ' + $message)
+    ('Telepitesi naplo: ' + $script:InstallLog)
+  ) -join [Environment]::NewLine
+  [IO.File]::WriteAllText($script:InstallError, $errorText, ([System.Text.UTF8Encoding]::new($false)))
+  Write-Host ''
+  Write-Host 'A telepites HIBAVAL leallt.' -ForegroundColor Red
+  Write-Host ('Lepes: ' + $script:InstallStage) -ForegroundColor Yellow
+  Write-Host ('Hiba: ' + $message) -ForegroundColor Yellow
+  Write-Host ('Naplo: ' + $script:InstallLog) -ForegroundColor Cyan
+  Write-Host ('Rovid hibajelentes: ' + $script:InstallError) -ForegroundColor Cyan
+  throw
+} finally {
+  Stop-Transcript | Out-Null
+}
