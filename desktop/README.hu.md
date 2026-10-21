@@ -49,3 +49,17 @@ A lokális Node.js tesztfájl (desktop/runtime.test.cjs) **4/4 tesztje sikeresen
 A Windows telepítési folyamatot nem futtattuk le ebben a környezetben.
 
 A fork eredeti main ágát nem módosítottuk.
+
+## 2026-10-22 — telepítőhiba utáni forráskód-audit
+
+Az első gyorsindító **nem volt Windows alatt végponttól végpontig tesztelt**, ezért nem tekinthető telepítőkiadásnak. A következő **kódból bizonyított hibákat/hiányosságokat** javítottuk a fejlesztői ágon:
+
+1. A LibreChat `/health` vagy gyökér HTTP-válaszát késznek tekintettük; ehelyett a **`/readyz`** végpont HTTP 200 válaszát várjuk meg, amely csak a teljes inicializálás után kész.
+2. A hivatalosan javasolt npm 11.16.0 helyett a Node.js ZIP-ben érkező 11.13.0 volt használatban; most külön települ a rögzített npm 11.16.0.
+3. Windows alatt a child.kill() azonnali folyamatleállításhoz vezethetett, még a MongoDB leállítása előtt; most IPC-vezérelt SIGTERM-alapú, időkorlátos backend leállítás előzi meg a MongoDB leállítását.
+4. A második alkalmazáspéldány nem volt tiltva; most az alkalmazás egyetlen példányt enged.
+5. A régi letöltött forrásban lévő hibás szkriptek beragadhattak; a bootstrap verziózott Desktop fájlokat frissít, az adatokat megtartja.
+
+**Teszt:** hét célzott Node.js egységteszt átment egy Linux/Node környezetben. A Windowsos felületi/telepítési/end-to-end teszt még nincs meg. A Windows GitHub Actions ellenőrzés forrása: `.github/workflows/desktop-windows-smoke.yml`. A PR továbbra is **Draft**, nem szabad kiadássá vagy működő EXE-telepítővé nyilvánítani.
+
+Fontos: a teljes LibreChat forrásból helyben történő `npm ci` / `npm run frontend` build még mindig fejlesztői folyamat. A célzott végleges megoldás az előre lefordított és Windows alatt valóban tesztelt telepítő, ahol a felhasználó nem a saját gépén buildeli a projektet.
