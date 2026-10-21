@@ -76,4 +76,44 @@ async function waitForHTTP(url, options = {}) {
   throw new Error('LibreChat did not become ready. Check desktop logs for details.');
 }
 
-module.exports = { isLoopbackHost, isLocalAppUrl, freePort, httpStatus, waitForHTTP };
+/**
+ * Ask the LibreChat Node backend to run its registered SIGTERM cleanup handlers.
+ * Windows child.kill() is a forceful TerminateProcess, so never use it first.
+ * Falls back to force-termination only after a bounded grace period.
+ */
+async function requestBackendStop(child, timeoutMs = 25000) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  return new Promise((resolve) => {
+    let finished = false;
+    let timer;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      child.off('exit', done);
+      resolve();
+    };
+    const forceStop = () => {
+      if (finished) return;
+      try { child.kill(); } catch { /* already exited */ }
+      // Child-process shutdown may still be asynchronous after kill().
+      // Give it a brief bounded grace period to signal exit.
+      timer = setTimeout(done, 3000);
+    };
+    child.once('exit', done);
+    timer = setTimeout(forceStop, timeoutMs);
+    try {
+      if (!child.connected || typeof child.send !== 'function') {
+        forceStop();
+      } else {
+        child.send({ type: 'librechat-desktop:shutdown' }, (error) => {
+          if (error) forceStop();
+        });
+      }
+    } catch {
+      forceStop();
+    }
+  });
+}
+
+module.exports = { isLoopbackHost, isLocalAppUrl, freePort, httpStatus, waitForHTTP, requestBackendStop };
