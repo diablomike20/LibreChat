@@ -2,7 +2,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { isLoopbackHost, isLocalAppUrl, freePort, waitForHTTP } = require('./runtime.cjs');
+const { EventEmitter } = require('node:events');
+const { isLoopbackHost, isLocalAppUrl, freePort, waitForHTTP, requestBackendStop } = require('./runtime.cjs');
 
 test('navigation permits only the local server on the selected port', () => {
   assert.equal(isLoopbackHost('127.0.0.1'), true);
@@ -39,4 +40,62 @@ test('waitForHTTP times out on a missing server', async () => {
     waitForHTTP(`http://127.0.0.1:${port}/`, { timeoutMs: 280, intervalMs: 30 }),
     /did not become ready/,
   );
+});
+
+test('waitForHTTP does not accept a 503 readiness response', async () => {
+  let ready = false;
+  const server = http.createServer((_req, res) => {
+    res.statusCode = ready ? 200 : 503;
+    res.end(ready ? 'OK' : 'NOT_READY');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = server.address().port;
+    setTimeout(() => { ready = true; }, 120);
+    assert.equal(
+      await waitForHTTP(`http://127.0.0.1:${port}/readyz`, { timeoutMs: 3000, intervalMs: 30 }),
+      200,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('requestBackendStop waits for the backend IPC acknowledgement and exit', async () => {
+  class FakeChild extends EventEmitter {
+    exitCode = null;
+    signalCode = null;
+    connected = true;
+    killed = false;
+    send(message, cb) {
+      assert.deepEqual(message, { type: 'librechat-desktop:shutdown' });
+      cb(null);
+      setTimeout(() => {
+        this.exitCode = 0;
+        this.emit('exit', 0, null);
+      }, 40);
+    }
+    kill() { this.killed = true; }
+  }
+  const child = new FakeChild();
+  await requestBackendStop(child, 300);
+  assert.equal(child.killed, false);
+});
+
+test('requestBackendStop forces a hung backend only after timeout', async () => {
+  class HungChild extends EventEmitter {
+    exitCode = null;
+    signalCode = null;
+    connected = true;
+    killed = false;
+    send(_message, cb) { cb(null); }
+    kill() {
+      this.killed = true;
+      this.exitCode = 1;
+      this.emit('exit', 1, null);
+    }
+  }
+  const child = new HungChild();
+  await requestBackendStop(child, 35);
+  assert.equal(child.killed, true);
 });
