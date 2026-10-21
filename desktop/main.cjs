@@ -10,7 +10,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { MongoMemoryServer } = require('mongodb-memory-server-core');
-const { freePort, isLocalAppUrl, waitForHTTP } = require('./runtime.cjs');
+const { freePort, isLocalAppUrl, waitForHTTP, requestBackendStop } = require('./runtime.cjs');
 
 const repoDir = path.resolve(__dirname, '..');
 const localRoot = process.env.LOCALAPPDATA
@@ -30,6 +30,7 @@ let isQuitting = false;
 let backendLog = null;
 let desktopUrl = '';
 let startupAborted = false;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 for (const dir of [userData, logsDir, dbDir, mongoBinaryDir, secretsDir]) {
   fs.mkdirSync(dir, { recursive: true });
@@ -154,11 +155,11 @@ async function startLibreChat(mongoUri) {
     LIBRECHAT_TEMP_CREDENTIALS_PATH: path.join(secretsDir, '.env.temp'),
     NO_PROXY: '127.0.0.1,localhost',
   };
-  backend = spawn(nodeExe, [entrypoint], {
+  backend = spawn(nodeExe, ['--require', path.join(__dirname, 'backend-control.cjs'), entrypoint], {
     cwd: repoDir,
     env,
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   backend.stdout.pipe(backendLog, { end: false });
   backend.stderr.pipe(backendLog, { end: false });
@@ -169,7 +170,9 @@ async function startLibreChat(mongoUri) {
       showError(new Error('A LibreChat háttérfolyamata váratlanul leállt. Nézd meg a backend.log fájlt.'));
     }
   });
-  await waitForHTTP(desktopUrl, { child: backend, timeoutMs: 120000 });
+  // LibreChat serves /health before post-listen initialization completes.
+  // /readyz returns 200 only when the application is fully initialized.
+  await waitForHTTP(`${desktopUrl}readyz`, { child: backend, timeoutMs: 180000 });
   return desktopUrl;
 }
 
@@ -194,7 +197,7 @@ async function start() {
 async function stop() {
   startupAborted = true;
   if (backend) {
-    backend.kill();
+    try { await requestBackendStop(backend, 25000); } catch (e) { log(`Backend shutdown failed: ${e.message}`); }
     backend = null;
   }
   if (mongo) {
@@ -215,4 +218,14 @@ app.on('before-quit', (event) => {
   stop().finally(() => app.exit(0));
 });
 app.on('window-all-closed', () => app.quit());
-app.whenReady().then(start).catch(showError);
+if (hasSingleInstanceLock) {
+  app.on('second-instance', () => {
+    if (window && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore();
+      window.focus();
+    }
+  });
+  app.whenReady().then(start).catch(showError);
+} else {
+  app.quit();
+}
