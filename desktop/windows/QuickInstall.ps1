@@ -41,11 +41,11 @@ try {
       if (-not (Test-Path (Join-Path $repo 'api\server\index.js'))) {
         throw ('A korabbi forras hianyos: ' + $repo + '. Az adatokat ne torold; a mappat kulon mentsd.')
       }
-      # Csak a Desktop modul 9 ismert forrasfajljat frissitjuk, a nagy
+      # Csak a Desktop modul ismert forrasfajljait frissitjuk, a nagy
       # LibreChat forrast/konfiguraciot/adatbazist megorizzuk.
       $desktopFiles = @(
         'main.cjs', 'runtime.cjs', 'runtime.test.cjs', 'status.html',
-        'package.json', 'README.hu.md', 'windows\Install.ps1',
+        'package.json', 'README.hu.md', 'windows\Diagnosztika.ps1', 'windows\Diagnosztika.cmd', 'windows\Install.ps1',
         'windows\QuickInstall.ps1', 'windows\Telepites.cmd'
       )
       foreach ($rel in $desktopFiles) {
