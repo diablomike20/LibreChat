@@ -32,6 +32,7 @@ let backendLog = null;
 let desktopUrl = '';
 let startupAborted = false;
 let startupTask = null;
+let startupAbortController = null;
 
 for (const dir of [userData, logsDir, dbDir, mongoBinaryDir, secretsDir]) {
   fs.mkdirSync(dir, { recursive: true });
@@ -134,7 +135,7 @@ async function startMongo() {
   return mongo.getUri('LibreChat');
 }
 
-async function startLibreChat(mongoUri) {
+async function startLibreChat(mongoUri, signal) {
   if (!fs.existsSync(nodeExe)) {
     throw new Error(`Nem található a hordozható Node.js: ${nodeExe}. Futtasd újra a Desktop telepítőt.`);
   }
@@ -176,17 +177,18 @@ async function startLibreChat(mongoUri) {
   });
   // LibreChat serves /health before post-listen initialization completes.
   // /readyz returns 200 only when the application is fully initialized.
-  await waitForHTTP(`${desktopUrl}readyz`, { child: backend, timeoutMs: 180000 });
+  await waitForHTTP(`${desktopUrl}readyz`, { child: backend, timeoutMs: 180000, signal });
   return desktopUrl;
 }
 
 async function start() {
+  startupAbortController = new AbortController();
   makeWindow();
   setupPermissions();
   try {
     const uri = await startMongo();
     if (startupAborted) return;
-    const url = await startLibreChat(uri);
+    const url = await startLibreChat(uri, startupAbortController.signal);
     if (startupAborted) return;
     reportStatus('Kész');
     if (window && !window.isDestroyed()) {
@@ -200,6 +202,7 @@ async function start() {
 
 async function stop() {
   startupAborted = true;
+  startupAbortController?.abort();
   // On a slow first run MongoDB may still be downloading when the user closes
   // the splash screen. Wait for startup to settle before inspecting children,
   // otherwise stop() can miss a newly created mongod process entirely.
