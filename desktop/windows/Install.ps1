@@ -78,15 +78,15 @@ if (-not (Test-Path $npmCmd)) { throw 'A Node.js telepites hianyos (npm.cmd nem 
 $env:PATH = $nodeDir + ';' + $env:PATH
 RunChecked -exe $nodeExe -arguments @('--version') -working $repo
 
-# The official LibreChat npm install guide pins npm 11.16.0.
+# The official LibreChat npm install guide pins npm 11.13.0.
 # Node 24.16.0 ships npm 11.13.0: using the bundled one is a version mismatch.
-$npmPrefix = Join-Path $localRoot 'runtime\npm-11.16'
+$npmPrefix = Join-Path $localRoot 'runtime\npm-11.13'
 $npmCli = Join-Path $npmPrefix 'node_modules\npm\bin\npm-cli.js'
 if (-not (Test-Path $npmCli)) {
-  Step '1b/5: LibreChat-hez elvart npm 11.16.0 telepitese'
-  RunChecked -exe $npmCmd -arguments @('install', '--prefix', $npmPrefix, '--no-audit', '--no-fund', '--no-save', 'npm@11.16.0') -working $repo
+  Step '1b/5: LibreChat-hez elvart npm 11.13.0 telepitese'
+  RunChecked -exe $npmCmd -arguments @('install', '--prefix', $npmPrefix, '--no-audit', '--no-fund', '--no-save', 'npm@11.13.0') -working $repo
 }
-if (-not (Test-Path $npmCli)) { throw 'A rögzített npm 11.16.0 telepitese sikertelen.' }
+if (-not (Test-Path $npmCli)) { throw 'A rögzített npm 11.13.0 telepitese sikertelen.' }
 RunChecked -exe $nodeExe -arguments @($npmCli, '--version') -working $repo
 
 Step '2/5: Helyi konfiguracio (egyedi titkos kulcsok, csak localhost)'
