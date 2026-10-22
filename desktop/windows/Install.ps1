@@ -103,7 +103,14 @@ foreach ($secret in @(
   @{ Name = 'CREDS_KEY'; Value = (New-Secret 16) },
   @{ Name = 'CREDS_IV'; Value = (New-Secret 8) }
 )) {
-  $match = [regex]::Match($envBody, '(?m)^' + [regex]::Escape($secret.Name) + '=(.*)
+  $pattern = '(?m)^' + [regex]::Escape($secret.Name) + '=(.*)$'
+  $match = [regex]::Match($envBody, $pattern)
+  if (-not $match.Success -or [string]::IsNullOrWhiteSpace($match.Groups[1].Value)) {
+    Set-DotEnv $secret.Name $secret.Value
+    $envBody = [IO.File]::ReadAllText($script:envFile)
+  }
+}
+Set-DotEnv 'HOST' '127.0.0.1'
 Set-DotEnv 'DOMAIN_CLIENT' 'http://127.0.0.1:3080'
 Set-DotEnv 'DOMAIN_SERVER' 'http://127.0.0.1:3080'
 Set-DotEnv 'SEARCH' 'false'
