@@ -58,12 +58,34 @@ jobs:
         run: npm run frontend
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-      - name: Install Electron
-        run: npm install --no-audit --no-fund --prefix desktop
-      - name: Verify Windows build artifacts
+      - name: Install Electron with explicit dev dependencies
+        run: npm install --no-audit --no-fund --include=dev --ignore-scripts=false --workspaces=false --prefix desktop
+      - name: Verify Windows build artifacts and Electron location
         run: |
           if (-not (Test-Path 'client/dist/index.html')) { throw 'LibreChat frontend dist missing' }
-          if (-not (Test-Path 'desktop/node_modules/electron/dist/electron.exe')) {
-            throw 'Windows Electron runtime missing'
+          $pkgPaths = @('desktop/node_modules/electron', 'node_modules/electron')
+          $foundPackage = $false
+          $foundExecutable = $false
+          foreach ($pkg in $pkgPaths) {
+            $installed = Test-Path (Join-Path $pkg 'package.json')
+            $exe = Test-Path (Join-Path $pkg 'dist/electron.exe')
+            Write-Host "Electron candidate: $pkg, package=$installed, exe=$exe"
+            if ($installed) { $foundPackage = $true }
+            if ($exe) { $foundExecutable = $true }
           }
+          Write-Host ('npm omit: ' + (npm config get omit))
+          Write-Host ('npm ignore-scripts: ' + (npm config get ignore-scripts))
+          if (-not $foundPackage) { throw 'Electron npm package missing' }
+          if (-not $foundExecutable) {
+            $install = $pkgPaths | ForEach-Object { Join-Path $_ 'install.js' } |
+              Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $install) { throw 'Electron install.js missing' }
+            Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+            node $install
+            if ($LASTEXITCODE -ne 0) { throw 'Electron binary download failed' }
+            foreach ($pkg in $pkgPaths) {
+              if (Test-Path (Join-Path $pkg 'dist/electron.exe')) { $foundExecutable = $true }
+            }
+          }
+          if (-not $foundExecutable) { throw 'Windows Electron executable is still missing' }
           Write-Host 'Windows dependency and build smoke passed; GUI+Mongo startup not yet exercised.'
