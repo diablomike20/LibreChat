@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { MongoMemoryServer } = require('mongodb-memory-server-core');
 const { freePort, isLocalAppUrl, waitForHTTP, requestBackendStop } = require('./runtime.cjs');
+const { stopMongoSafely } = require('./mongo-lifecycle.cjs');
 
 const repoDir = path.resolve(__dirname, '..');
 const localRoot = process.env.LOCALAPPDATA
@@ -210,8 +211,15 @@ async function stop() {
     backend = null;
   }
   if (mongo) {
-    // Explicitly keep the dbPath: never drop user conversations on shutdown.
-    try { await mongo.stop({ doCleanup: false }); } catch (e) { log(`Mongo stop failed: ${e.message}`); }
+    // Windows SIGINT is not a safe shutdown for recent MongoDB writes.
+    // Flush and use the server's own shutdown command before stopping manager.
+    try {
+      await stopMongoSafely(mongo);
+    } catch (error) {
+      log(`Graceful MongoDB shutdown failed: ${error.message}`);
+      // Last-resort process cleanup, keeping the db files on disk.
+      try { await mongo.stop({ doCleanup: false }); } catch (e) { log(`Mongo fallback stop failed: ${e.message}`); }
+    }
     mongo = null;
   }
   if (backendLog) {
