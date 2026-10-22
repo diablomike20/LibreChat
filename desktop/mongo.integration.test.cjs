@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { MongoClient } = require('mongodb');
 const { MongoMemoryServer } = require('mongodb-memory-server-core');
+const { stopMongoSafely } = require('./mongo-lifecycle.cjs');
 
 test('Windows MongoDB 8.0.20 persists a conversation document across restart', { timeout: 180000 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'librechat-desktop-mongo-'));
@@ -33,7 +34,7 @@ test('Windows MongoDB 8.0.20 persists a conversation document across restart', {
     });
     await client.close();
     client = null;
-    await server.stop({ doCleanup: false });
+    await stopMongoSafely(server);
     server = null;
 
     server = await MongoMemoryServer.create(commonOptions);
@@ -45,7 +46,7 @@ test('Windows MongoDB 8.0.20 persists a conversation document across restart', {
     assert.equal(found?.content, 'Adatmegorzes ellenorzese');
   } finally {
     if (client) await client.close();
-    if (server) await server.stop({ doCleanup: false });
+    if (server) await stopMongoSafely(server);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
