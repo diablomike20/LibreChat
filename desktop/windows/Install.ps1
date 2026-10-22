@@ -57,7 +57,17 @@ $npmCmd = Join-Path $nodeDir 'npm.cmd'
 New-Item -ItemType Directory -Force -Path $localRoot | Out-Null
 
 Step '1/5: Hordozhato Node.js 24.16.0 ellenorzese'
-if (-not (Test-Path $nodeExe)) {
+$nodeNeedsInstall = -not (Test-Path $nodeExe) -or -not (Test-Path $npmCmd)
+if (-not $nodeNeedsInstall) {
+  try {
+    $existingNodeVersion = (& $nodeExe --version 2>$null).Trim()
+    $nodeNeedsInstall = ($LASTEXITCODE -ne 0 -or $existingNodeVersion -ne 'v24.16.0')
+  } catch {
+    $nodeNeedsInstall = $true
+  }
+}
+if ($nodeNeedsInstall) {
+  if (Test-Path $nodeDir) { Remove-Item -Recurse -Force $nodeDir }
   $zipPath = Join-Path $env:TEMP 'librechat-node-v24.16.0.zip'
   $nodeUrl = 'https://nodejs.org/dist/v24.16.0/node-v24.16.0-win-x64.zip'
   $expectedSHA256 = 'edaca9bd58ec8e92037dac4e877d52f6b8f430b81c18b57e264b4e2fb111cd56'
@@ -76,18 +86,36 @@ if (-not (Test-Path $nodeExe)) {
 }
 if (-not (Test-Path $npmCmd)) { throw 'A Node.js telepites hianyos (npm.cmd nem talalhato).' }
 $env:PATH = $nodeDir + ';' + $env:PATH
-RunChecked -exe $nodeExe -arguments @('--version') -working $repo
+$nodeVersion = (& $nodeExe --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -ne 'v24.16.0') {
+  throw "Nem megfelelo Node.js-verzio: '$nodeVersion'. Elvart: v24.16.0."
+}
+Write-Host ('Ellenorzott Node.js: ' + $nodeVersion) -ForegroundColor Green
 
 # The official LibreChat npm install guide pins npm 11.13.0.
 # Node 24.16.0 ships npm 11.13.0: using the bundled one is a version mismatch.
 $npmPrefix = Join-Path $localRoot 'runtime\npm-11.13'
 $npmCli = Join-Path $npmPrefix 'node_modules\npm\bin\npm-cli.js'
-if (-not (Test-Path $npmCli)) {
+$npmVersion = $null
+if (Test-Path $npmCli) {
+  try {
+    $npmVersion = (& $nodeExe $npmCli --version 2>$null).Trim()
+    if ($LASTEXITCODE -ne 0) { $npmVersion = $null }
+  } catch {
+    $npmVersion = $null
+  }
+}
+if ($npmVersion -ne '11.13.0') {
+  if (Test-Path $npmPrefix) { Remove-Item -Recurse -Force $npmPrefix }
   Step '1b/5: LibreChat-hez elvart npm 11.13.0 telepitese'
   RunChecked -exe $npmCmd -arguments @('install', '--prefix', $npmPrefix, '--no-audit', '--no-fund', '--no-save', 'npm@11.13.0') -working $repo
 }
 if (-not (Test-Path $npmCli)) { throw 'A rögzített npm 11.13.0 telepitese sikertelen.' }
-RunChecked -exe $nodeExe -arguments @($npmCli, '--version') -working $repo
+$npmVersion = (& $nodeExe $npmCli --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $npmVersion -ne '11.13.0') {
+  throw "Nem megfelelo npm-verzio: '$npmVersion'. Elvart: 11.13.0."
+}
+Write-Host ('Ellenorzott npm: ' + $npmVersion) -ForegroundColor Green
 
 Step '2/5: Helyi konfiguracio (egyedi titkos kulcsok, csak localhost)'
 $script:envFile = Join-Path $repo '.env'
