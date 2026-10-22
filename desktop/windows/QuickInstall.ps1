@@ -44,7 +44,7 @@ try {
       # Csak a Desktop modul ismert forrasfajljait frissitjuk, a nagy
       # LibreChat forrast/konfiguraciot/adatbazist megorizzuk.
       $desktopFiles = @(
-        'main.cjs', 'backend-control.cjs', 'runtime.cjs', 'runtime.test.cjs', 'status.html',
+        'main.cjs', 'backend-control.cjs', 'runtime.cjs', 'runtime.test.cjs', 'mongo-lifecycle.cjs', 'mongo.integration.test.cjs', 'status.html',
         'package.json', 'README.hu.md', 'windows\Diagnosztika.ps1', 'windows\Diagnosztika.cmd', 'windows\Install.ps1',
         'windows\QuickInstall.ps1', 'windows\Telepites.cmd'
       )
