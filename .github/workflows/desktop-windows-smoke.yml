@@ -112,6 +112,56 @@ jobs:
           }
           foreach ($key in $vals.Keys) {
             $line = '(?m)^' + [regex]::Escape($key) + '=.*
+            $replacement = $key + '=' + $vals[$key]
+            if ([regex]::IsMatch($text, $line)) { $text = [regex]::Replace($text, $line, $replacement) }
+            else { $text += "`n$replacement`n" }
+          }
+          [IO.File]::WriteAllText($envPath, $text, ([System.Text.UTF8Encoding]::new($false)))
+      - name: Launch actual Electron + LibreChat backend and wait for readiness
+        timeout-minutes: 6
+        run: |
+          $electron = (Resolve-Path 'desktop/node_modules/electron/dist/electron.exe').Path
+          $work = (Resolve-Path 'desktop').Path
+          $appData = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/data'
+          $logDir = Join-Path $appData 'logs'
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $proc = Start-Process -FilePath $electron -ArgumentList @('.') -WorkingDirectory $work -PassThru
+          $deadline = (Get-Date).AddMinutes(4)
+          $ready = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 3
+            if ($proc.HasExited) {
+              $desktopLog = Join-Path $logDir 'desktop.log'
+              $backendLog = Join-Path $logDir 'backend.log'
+              if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+              if (Test-Path $backendLog) { Get-Content $backendLog -Tail 160 }
+              throw "Electron exited before LibreChat became ready (exit $($proc.ExitCode))."
+            }
+            $desktopLog = Join-Path $logDir 'desktop.log'
+            if ((Test-Path $desktopLog) -and (Select-String -Path $desktopLog -Pattern 'Kész' -Quiet)) {
+              $ready = $true
+              break
+            }
+            $backendLog = Join-Path $logDir 'backend.log'
+            if ((Test-Path $backendLog) -and (Select-String -Path $backendLog -Pattern 'START ERROR|Error:|ERR_' -Quiet)) {
+              Get-Content $backendLog -Tail 160
+              throw 'LibreChat backend logged a startup error.'
+            }
+          }
+          if (-not $ready) {
+            if (Test-Path (Join-Path $logDir 'desktop.log')) { Get-Content (Join-Path $logDir 'desktop.log') -Tail 100 }
+            if (Test-Path (Join-Path $logDir 'backend.log')) { Get-Content (Join-Path $logDir 'backend.log') -Tail 160 }
+            throw 'Electron launched but LibreChat did not reach the ready state within four minutes.'
+          }
+          Write-Host 'PASS: real Electron window started and LibreChat /readyz was reached.'
+          $null = $proc.CloseMainWindow()
+          if (-not $proc.WaitForExit(30000)) {
+            Stop-Process -Id $proc.Id -Force
+            throw 'Electron did not shut down cleanly after the E2E check.'
+          }
+      - name: MongoDB binary launch and persistence across restart
+        run: node --test desktop/mongo.integration.test.cjs
+
 
             $replacement = $key + '=' + $vals[$key]
             if ([regex]::IsMatch($text, $line)) { $text = [regex]::Replace($text, $line, $replacement) }
