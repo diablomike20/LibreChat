@@ -31,7 +31,6 @@ let backendLog = null;
 let desktopUrl = '';
 let startupAborted = false;
 let startupTask = null;
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 for (const dir of [userData, logsDir, dbDir, mongoBinaryDir, secretsDir]) {
   fs.mkdirSync(dir, { recursive: true });
@@ -39,6 +38,9 @@ for (const dir of [userData, logsDir, dbDir, mongoBinaryDir, secretsDir]) {
 app.setName('LibreChat Desktop');
 app.setPath('userData', userData);
 if (process.platform === 'win32') app.setAppUserModelId('org.librechat.desktop.local');
+// The single-instance lock must be scoped to the configured application data
+// location, not Electron's default shared development userData directory.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 function log(message) {
   const stamp = new Date().toISOString();
