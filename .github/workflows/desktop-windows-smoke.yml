@@ -63,19 +63,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path $ciLocal | Out-Null
           "LOCALAPPDATA=$ciLocal" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Remove-Item '.env' -Force -ErrorAction SilentlyContinue
-      - name: Run the actual Windows installer
+      - name: Run the actual QuickInstall bootstrap
         timeout-minutes: 20
         run: |
-          & 'desktop/windows/Install.ps1'
+          & 'desktop/windows/QuickInstall.ps1'
           if (-not $?) { throw 'LibreChat Desktop installer failed.' }
           $appRoot = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop'
           if (-not (Test-Path (Join-Path $appRoot 'runtime/node/node.exe'))) {
             throw 'Installer did not provision the portable Node.js runtime.'
           }
-          if (-not (Test-Path 'client/dist/index.html')) {
+          if (-not (Test-Path (Join-Path $appRoot 'LibreChat/client/dist/index.html'))) {
             throw 'Installer did not build the LibreChat frontend.'
           }
-          if (-not (Test-Path 'desktop/node_modules/electron/dist/electron.exe')) {
+          if (-not (Test-Path (Join-Path $appRoot 'LibreChat/desktop/node_modules/electron/dist/electron.exe'))) {
             throw 'Installer did not provision the Electron executable.'
           }
           $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'LibreChat Desktop.lnk'
@@ -84,7 +84,7 @@ jobs:
           if (-not (Test-Path $desktopShortcut) -or -not (Test-Path $startMenuShortcut)) {
             throw 'Installer did not create both the desktop and Start menu shortcuts.'
           }
-          $envText = [IO.File]::ReadAllText((Resolve-Path '.env').Path)
+          $envText = [IO.File]::ReadAllText((Join-Path $appRoot 'LibreChat/.env'))
           foreach ($required in @(
             @{ Name = 'CREDS_KEY'; Pattern = '^[0-9a-fA-F]{64}$' },
             @{ Name = 'CREDS_IV'; Pattern = '^[0-9a-fA-F]{32}$' }
@@ -149,4 +149,8 @@ jobs:
             throw 'Electron did not shut down cleanly after the E2E check.'
           }
       - name: MongoDB binary launch and persistence across restart
-        run: node --test desktop/mongo.integration.test.cjs
+        run: |
+          $appRoot = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/LibreChat'
+          $nodeExe = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/runtime/node/node.exe'
+          & $nodeExe (Join-Path $appRoot 'desktop/mongo.integration.test.cjs')
+          if ($LASTEXITCODE -ne 0) { throw 'MongoDB persistence integration test failed.' }
