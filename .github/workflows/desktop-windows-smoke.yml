@@ -88,4 +88,6 @@ jobs:
             }
           }
           if (-not $foundExecutable) { throw 'Windows Electron executable is still missing' }
-          Write-Host 'Windows dependency and build smoke passed; GUI+Mongo startup not yet exercised.'
+          Write-Host 'Windows dependency and build smoke passed; full LibreChat GUI not yet exercised.'
+      - name: MongoDB binary launch and persistence across restart
+        run: node --test desktop/mongo.integration.test.cjs
