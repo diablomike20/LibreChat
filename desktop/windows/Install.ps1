@@ -115,9 +115,35 @@ if (-not (Test-Path (Join-Path $repo 'client\dist\index.html'))) { throw 'A Libr
 
 Step '5/5: Electron + helyi MongoDB motor telepitese'
 $desktopDir = Join-Path $repo 'desktop'
-RunChecked -exe $nodeExe -arguments @($npmCli, 'install', '--no-audit', '--no-fund', '--prefix', $desktopDir) -working $repo
-$electronExe = Join-Path $desktopDir 'node_modules\electron\dist\electron.exe'
-if (-not (Test-Path $electronExe)) { throw 'Az Electron binaris hianyzik a telepites utan.' }
+# Require devDependencies, lifecycle scripts and package-local installation.
+# The first Windows CI reached this point and failed because the exe was not
+# found at the hardcoded path despite npm reporting successful installation.
+RunChecked -exe $nodeExe -arguments @($npmCli, 'install', '--no-audit', '--no-fund', '--include=dev', '--ignore-scripts=false', '--workspaces=false', '--prefix', $desktopDir) -working $repo
+$electronPackages = @(
+  (Join-Path $desktopDir 'node_modules\electron'),
+  (Join-Path $repo 'node_modules\electron')
+)
+$electronExe = $null
+foreach ($electronPackage in $electronPackages) {
+  $candidate = Join-Path $electronPackage 'dist\electron.exe'
+  if (Test-Path $candidate) { $electronExe = $candidate; break }
+}
+if (-not $electronExe) {
+  $electronPackage = $electronPackages | Where-Object { Test-Path (Join-Path $_ 'install.js') } | Select-Object -First 1
+  if (-not $electronPackage) { throw 'Az Electron npm csomag sem talalhato a telepites utan.' }
+  # A binary download may have been skipped by the host environment.
+  # Explicitly invoke Electron's official install script rather than
+  # silently creating a shortcut to a missing executable.
+  if (Test-Path Env:ELECTRON_SKIP_BINARY_DOWNLOAD) { Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD }
+  Step '5b/5: Az Electron Windows futtathato fajljanak beszerzese'
+  RunChecked -exe $nodeExe -arguments @((Join-Path $electronPackage 'install.js')) -working $electronPackage
+  $candidate = Join-Path $electronPackage 'dist\electron.exe'
+  if (Test-Path $candidate) { $electronExe = $candidate }
+}
+if (-not $electronExe) {
+  throw 'Az Electron telepult npm csomagkent, de a Windows electron.exe nem erheto el. A telepites itt leall.'
+}
+Write-Host ('Ellenorzott Electron: ' + $electronExe) -ForegroundColor Green
 
 Step 'Windows Start menu es asztali parancsikon'
 $wsh = New-Object -ComObject WScript.Shell
