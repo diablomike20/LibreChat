@@ -56,109 +56,87 @@ jobs:
           }
       - name: Test desktop control logic
         run: node --test desktop/runtime.test.cjs
-      - name: Install LibreChat dependencies
-        run: npm ci --no-audit --no-fund
-      - name: Build LibreChat UI
-        run: npm run frontend
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-      - name: Install Electron with explicit dev dependencies
-        run: npm install --no-audit --no-fund --include=dev --ignore-scripts=false --workspaces=false --prefix desktop
-      - name: Verify Windows build artifacts and Electron location
-        run: |
-          if (-not (Test-Path 'client/dist/index.html')) { throw 'LibreChat frontend dist missing' }
-          $pkgPaths = @('desktop/node_modules/electron', 'node_modules/electron')
-          $foundPackage = $false
-          $foundExecutable = $false
-          foreach ($pkg in $pkgPaths) {
-            $installed = Test-Path (Join-Path $pkg 'package.json')
-            $exe = Test-Path (Join-Path $pkg 'dist/electron.exe')
-            Write-Host "Electron candidate: $pkg, package=$installed, exe=$exe"
-            if ($installed) { $foundPackage = $true }
-            if ($exe) { $foundExecutable = $true }
-          }
-          Write-Host ('npm omit: ' + (npm config get omit))
-          Write-Host ('npm ignore-scripts: ' + (npm config get ignore-scripts))
-          if (-not $foundPackage) { throw 'Electron npm package missing' }
-          if (-not $foundExecutable) {
-            $install = $pkgPaths | ForEach-Object { Join-Path $_ 'install.js' } |
-              Where-Object { Test-Path $_ } | Select-Object -First 1
-            if (-not $install) { throw 'Electron install.js missing' }
-            Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
-            node $install
-            if ($LASTEXITCODE -ne 0) { throw 'Electron binary download failed' }
-            foreach ($pkg in $pkgPaths) {
-              if (Test-Path (Join-Path $pkg 'dist/electron.exe')) { $foundExecutable = $true }
-            }
-          }
-          if (-not $foundExecutable) { throw 'Windows Electron executable is still missing' }
-          Write-Host 'Windows dependencies and Electron binary verified.'
-      - name: Prepare isolated LibreChat Desktop runtime
+      - name: Prepare isolated installer profile
         run: |
           $ciLocal = Join-Path $env:RUNNER_TEMP 'LibreChatDesktop-E2E'
-          $runtimeNode = Join-Path $ciLocal 'LibreChatDesktop/runtime/node'
-          New-Item -ItemType Directory -Force -Path $runtimeNode | Out-Null
-          $nodePath = (Get-Command node).Source
-          Copy-Item $nodePath (Join-Path $runtimeNode 'node.exe') -Force
+          if (Test-Path $ciLocal) { Remove-Item -Recurse -Force $ciLocal }
+          New-Item -ItemType Directory -Force -Path $ciLocal | Out-Null
           "LOCALAPPDATA=$ciLocal" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Copy-Item '.env.example' '.env' -Force
-          $envPath = (Resolve-Path '.env').Path
-          $text = [IO.File]::ReadAllText($envPath)
-          $vals = @{
-            'HOST'='127.0.0.1'; 'DOMAIN_CLIENT'='http://127.0.0.1:3080';
-            'DOMAIN_SERVER'='http://127.0.0.1:3080'; 'SEARCH'='false';
-            'ALLOW_REGISTRATION'='true'; 'ALLOW_EMAIL_LOGIN'='true';
-            'SESSION_COOKIE_SECURE'='false';
-            'JWT_SECRET'=[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N');
-            'JWT_REFRESH_SECRET'=[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N');
-            'CREDS_KEY'=[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N');
-            'CREDS_IV'=[guid]::NewGuid().ToString('N')
+          Remove-Item '.env' -Force -ErrorAction SilentlyContinue
+      - name: Run the actual Windows installer
+        timeout-minutes: 20
+        run: |
+          & 'desktop/windows/Install.ps1'
+          if (-not $?) { throw 'LibreChat Desktop installer failed.' }
+          $appRoot = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop'
+          if (-not (Test-Path (Join-Path $appRoot 'runtime/node/node.exe'))) {
+            throw 'Installer did not provision the portable Node.js runtime.'
           }
-          foreach ($key in $vals.Keys) {
-            $line = '(?m)^' + [regex]::Escape($key) + '=.*$'
-
-            $replacement = $key + '=' + $vals[$key]
-            if ([regex]::IsMatch($text, $line)) { $text = [regex]::Replace($text, $line, $replacement) }
-            else { $text += "`n$replacement`n" }
+          if (-not (Test-Path 'client/dist/index.html')) {
+            throw 'Installer did not build the LibreChat frontend.'
           }
-          [IO.File]::WriteAllText($envPath, $text, ([System.Text.UTF8Encoding]::new($false)))
-      - name: Launch actual Electron + LibreChat backend and wait for readiness
+          if (-not (Test-Path 'desktop/node_modules/electron/dist/electron.exe')) {
+            throw 'Installer did not provision the Electron executable.'
+          }
+          $envText = [IO.File]::ReadAllText((Resolve-Path '.env').Path)
+          foreach ($required in @(
+            @{ Name = 'CREDS_KEY'; Pattern = '^[0-9a-fA-F]{64}$' },
+            @{ Name = 'CREDS_IV'; Pattern = '^[0-9a-fA-F]{32}$' }
+          )) {
+            $linePattern = '(?m)^' + [regex]::Escape($required.Name) + '=(.*)$'
+            $match = [regex]::Match($envText, $linePattern)
+            if (-not $match.Success -or -not [regex]::IsMatch($match.Groups[1].Value, $required.Pattern)) {
+              throw ("Installer wrote an invalid " + $required.Name + " value.")
+            }
+          }
+          Write-Host 'PASS: installer provisioned Node, Electron, frontend, and valid credential lengths.'
+      - name: Verify installed Electron readiness and graceful shutdown
         timeout-minutes: 6
         run: |
-          $electron = (Resolve-Path 'desktop/node_modules/electron/dist/electron.exe').Path
-          $work = (Resolve-Path 'desktop').Path
           $appData = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/data'
           $logDir = Join-Path $appData 'logs'
-          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-          $proc = Start-Process -FilePath $electron -ArgumentList @('.') -WorkingDirectory $work -PassThru
+          $pidFile = Join-Path $logDir 'electron.pid'
+          $desktopLog = Join-Path $logDir 'desktop.log'
+          $backendLog = Join-Path $logDir 'backend.log'
           $deadline = (Get-Date).AddMinutes(4)
+          $pidSeenAt = $null
+          $proc = $null
           $ready = $false
           while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 3
-            if ($proc.HasExited) {
-              $desktopLog = Join-Path $logDir 'desktop.log'
-              $backendLog = Join-Path $logDir 'backend.log'
-              if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
-              if (Test-Path $backendLog) { Get-Content $backendLog -Tail 160 }
-              throw "Electron exited before LibreChat became ready (exit $($proc.ExitCode))."
+            if (Test-Path $pidFile) {
+              if ($null -eq $pidSeenAt) { $pidSeenAt = Get-Date }
+              $pidText = (Get-Content -LiteralPath $pidFile -Raw).Trim()
+              if ($pidText -match '^\d+$') {
+                try { $proc = Get-Process -Id ([int]$pidText) -ErrorAction Stop }
+                catch { $proc = $null }
+              }
             }
-            $desktopLog = Join-Path $logDir 'desktop.log'
+            if ((Test-Path $backendLog) -and (Select-String -Path $backendLog -Pattern 'START ERROR|Error:|ERR_' -Quiet)) {
+              Get-Content $backendLog -Tail 160
+              if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+              throw 'LibreChat backend logged a startup error.'
+            }
             if ((Test-Path $desktopLog) -and (Select-String -Path $desktopLog -Pattern 'Kész' -Quiet)) {
+              if (-not $proc) {
+                Get-Content $desktopLog -Tail 100
+                throw 'Electron reported readiness but its main process is no longer running.'
+              }
               $ready = $true
               break
             }
-            $backendLog = Join-Path $logDir 'backend.log'
-            if ((Test-Path $backendLog) -and (Select-String -Path $backendLog -Pattern 'START ERROR|Error:|ERR_' -Quiet)) {
-              Get-Content $backendLog -Tail 160
-              throw 'LibreChat backend logged a startup error.'
+            if ($pidSeenAt -and -not $proc -and ((Get-Date) - $pidSeenAt).TotalSeconds -gt 10) {
+              if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+              if (Test-Path $backendLog) { Get-Content $backendLog -Tail 160 }
+              throw 'Electron exited before LibreChat became ready.'
             }
+            Start-Sleep -Seconds 3
           }
           if (-not $ready) {
-            if (Test-Path (Join-Path $logDir 'desktop.log')) { Get-Content (Join-Path $logDir 'desktop.log') -Tail 100 }
-            if (Test-Path (Join-Path $logDir 'backend.log')) { Get-Content (Join-Path $logDir 'backend.log') -Tail 160 }
-            throw 'Electron launched but LibreChat did not reach the ready state within four minutes.'
+            if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+            if (Test-Path $backendLog) { Get-Content $backendLog -Tail 160 }
+            throw 'Installed LibreChat did not reach the ready state within four minutes.'
           }
-          Write-Host 'PASS: real Electron window started and LibreChat /readyz was reached.'
+          Write-Host 'PASS: installer-launched Electron reached LibreChat /readyz.'
           $null = $proc.CloseMainWindow()
           if (-not $proc.WaitForExit(60000)) {
             Stop-Process -Id $proc.Id -Force
