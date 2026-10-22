@@ -204,7 +204,12 @@ Write-Host 'Elso inditaskor a MongoDB binaris automatikusan letoltodik. Ez inter
 Write-Host 'A MongoDB adatok es a naplok a LocalAppData\LibreChatDesktop\data mappaban maradnak.'
 Write-Host 'Az AI szolgaltatokhoz szukseges kulcsokat kulon kell megadni a LibreChat beallitasainal.'
 Step 'Alkalmazas inditasa'
-Start-Process -FilePath $electronExe -ArgumentList ('"' + $desktopDir + '"') -WorkingDirectory $desktopDir
+$desktopProcess = Start-Process -FilePath $electronExe -ArgumentList ('"' + $desktopDir + '"') -WorkingDirectory $desktopDir -PassThru
+[IO.File]::WriteAllText(
+  (Join-Path $script:InstallLogs 'electron.pid'),
+  [string]$desktopProcess.Id,
+  ([System.Text.UTF8Encoding]::new($false))
+)
 
   if (Test-Path $script:InstallError) { Remove-Item -Force $script:InstallError }
 } catch {
