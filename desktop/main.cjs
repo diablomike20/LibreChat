@@ -30,6 +30,7 @@ let isQuitting = false;
 let backendLog = null;
 let desktopUrl = '';
 let startupAborted = false;
+let startupTask = null;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 for (const dir of [userData, logsDir, dbDir, mongoBinaryDir, secretsDir]) {
@@ -196,6 +197,12 @@ async function start() {
 
 async function stop() {
   startupAborted = true;
+  // On a slow first run MongoDB may still be downloading when the user closes
+  // the splash screen. Wait for startup to settle before inspecting children,
+  // otherwise stop() can miss a newly created mongod process entirely.
+  if (startupTask) {
+    try { await startupTask; } catch (error) { log(`Startup settling during shutdown: ${error.message}`); }
+  }
   if (backend) {
     try { await requestBackendStop(backend, 25000); } catch (e) { log(`Backend shutdown failed: ${e.message}`); }
     backend = null;
@@ -225,7 +232,10 @@ if (hasSingleInstanceLock) {
       window.focus();
     }
   });
-  app.whenReady().then(start).catch(showError);
+  app.whenReady().then(() => {
+    startupTask = start();
+    return startupTask;
+  }).catch(showError);
 } else {
   app.quit();
 }
