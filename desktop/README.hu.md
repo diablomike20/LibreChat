@@ -63,3 +63,13 @@ Az első gyorsindító **nem volt Windows alatt végponttól végpontig tesztelt
 **Teszt:** hét célzott Node.js egységteszt átment egy Linux/Node környezetben. A Windowsos felületi/telepítési/end-to-end teszt még nincs meg. A Windows GitHub Actions ellenőrzés forrása: `.github/workflows/desktop-windows-smoke.yml`. A PR továbbra is **Draft**, nem szabad kiadássá vagy működő EXE-telepítővé nyilvánítani.
 
 Fontos: a teljes LibreChat forrásból helyben történő `npm ci` / `npm run frontend` build még mindig fejlesztői folyamat. A célzott végleges megoldás az előre lefordított és Windows alatt valóban tesztelt telepítő, ahol a felhasználó nem a saját gépén buildeli a projektet.
+
+## 2026-10-22 — második audit (GitHub Windows CI naplók alapján)
+
+- A két korábbi Windows-smoke teszt **bizonyítottan elbukott** a `Verify Windows build artifacts` ellenőrzésen: `Windows Electron runtime missing`. A frontend build és a desktop alaptesztek addig sikeresek voltak. Ez nem egy igazolt komplett Electron runtime-indítás volt.
+- Az Electron most külön `--include=dev --ignore-scripts=false --workspaces=false` opciókkal települ. A script a lehetséges tényleges exe-helyeket vizsgálja, majd szükség esetén futtatja az Electron saját `install.js` binárisletöltőjét. Az új GitHub Windows-smoke ezt ellenőrzi.
+- Az első indítási MongoDB letöltés és az alkalmazás bezárása között versenyhelyzet volt: a korábbi `stop()` anélkül térhetett vissza, hogy észrevette volna a későn elinduló adatbázist. Az indítási feladat lezárását a leállítás már megvárja.
+- Az új Windows-smoke eredménye külön ellenőrizendő; **amíg nincs zöld teljes eredmény és Electron/MongoDB futáspróba, a POC nem kiadható telepítő**.
+- A JavaScript 7 célzott egységtesztje átment a forrásszintű kontrollon, de ez a valódi Windows E2E tesztet nem váltja ki.
+
+**Jelenlegi fejlesztési korlát:** a Windows-szkript továbbra is a felhasználó gépén végzi a teljes `npm ci` és `npm run frontend` fordítást, ezért nem teljesíti a végleges előre lefordított egyszerű telepítő követelményét. Kész EXE és Windows telepítőcsomag még nincs.
