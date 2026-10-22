@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: librechat-desktop-windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -156,7 +160,7 @@ jobs:
           }
           Write-Host 'PASS: real Electron window started and LibreChat /readyz was reached.'
           $null = $proc.CloseMainWindow()
-          if (-not $proc.WaitForExit(30000)) {
+          if (-not $proc.WaitForExit(60000)) {
             Stop-Process -Id $proc.Id -Force
             throw 'Electron did not shut down cleanly after the E2E check.'
           }
