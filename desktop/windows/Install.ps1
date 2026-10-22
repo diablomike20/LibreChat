@@ -128,8 +128,8 @@ $envBody = [IO.File]::ReadAllText($script:envFile)
 foreach ($secret in @(
   @{ Name = 'JWT_SECRET'; Value = (New-Secret 48) },
   @{ Name = 'JWT_REFRESH_SECRET'; Value = (New-Secret 48) },
-  @{ Name = 'CREDS_KEY'; Value = (New-Secret 16) },
-  @{ Name = 'CREDS_IV'; Value = (New-Secret 8) }
+  @{ Name = 'CREDS_KEY'; Value = (New-Secret 32) },
+  @{ Name = 'CREDS_IV'; Value = (New-Secret 16) }
 )) {
   $pattern = '(?m)^' + [regex]::Escape($secret.Name) + '=(.*)$'
   $match = [regex]::Match($envBody, $pattern)
