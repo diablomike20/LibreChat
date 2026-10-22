@@ -42,6 +42,22 @@ test('waitForHTTP times out on a missing server', async () => {
   );
 });
 
+test('waitForHTTP cancels promptly when startup is aborted', async () => {
+  const port = await freePort();
+  const controller = new AbortController();
+  const pending = waitForHTTP(`http://127.0.0.1:${port}/`, {
+    timeoutMs: 30000,
+    intervalMs: 30,
+    signal: controller.signal,
+  });
+  const abortTimer = setTimeout(() => controller.abort(), 80);
+  try {
+    await assert.rejects(pending, { name: 'AbortError' });
+  } finally {
+    clearTimeout(abortTimer);
+  }
+});
+
 test('waitForHTTP does not accept a 503 readiness response', async () => {
   let ready = false;
   const server = http.createServer((_req, res) => {
