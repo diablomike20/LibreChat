@@ -78,6 +78,12 @@ jobs:
           if (-not (Test-Path 'desktop/node_modules/electron/dist/electron.exe')) {
             throw 'Installer did not provision the Electron executable.'
           }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'LibreChat Desktop.lnk'
+          $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          $startMenuShortcut = Join-Path $startMenu 'LibreChat Desktop.lnk'
+          if (-not (Test-Path $desktopShortcut) -or -not (Test-Path $startMenuShortcut)) {
+            throw 'Installer did not create both the desktop and Start menu shortcuts.'
+          }
           $envText = [IO.File]::ReadAllText((Resolve-Path '.env').Path)
           foreach ($required in @(
             @{ Name = 'CREDS_KEY'; Pattern = '^[0-9a-fA-F]{64}$' },
@@ -85,7 +91,7 @@ jobs:
           )) {
             $linePattern = '(?m)^' + [regex]::Escape($required.Name) + '=(.*)$'
             $match = [regex]::Match($envText, $linePattern)
-            if (-not $match.Success -or -not [regex]::IsMatch($match.Groups[1].Value, $required.Pattern)) {
+            if (-not $match.Success -or -not [regex]::IsMatch($match.Groups[1].Value.Trim(), $required.Pattern)) {
               throw ("Installer wrote an invalid " + $required.Name + " value.")
             }
           }
