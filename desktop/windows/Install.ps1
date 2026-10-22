@@ -92,8 +92,8 @@ if ($LASTEXITCODE -ne 0 -or $nodeVersion -ne 'v24.16.0') {
 }
 Write-Host ('Ellenorzott Node.js: ' + $nodeVersion) -ForegroundColor Green
 
-# The official LibreChat npm install guide pins npm 11.13.0.
-# Node 24.16.0 ships npm 11.13.0: using the bundled one is a version mismatch.
+# The repository pins npm 11.13.0. Keep a managed copy so the installer can
+# verify and repair npm independently of the Node.js bundle.
 $npmPrefix = Join-Path $localRoot 'runtime\npm-11.13'
 $npmCli = Join-Path $npmPrefix 'node_modules\npm\bin\npm-cli.js'
 $npmVersion = $null
@@ -136,6 +136,28 @@ foreach ($secret in @(
   if (-not $match.Success -or [string]::IsNullOrWhiteSpace($match.Groups[1].Value)) {
     Set-DotEnv $secret.Name $secret.Value
     $envBody = [IO.File]::ReadAllText($script:envFile)
+  }
+}
+
+# Validate existing non-empty credential values before the expensive build.
+# Never rotate an invalid but non-empty key silently: it may be needed to decrypt stored data.
+$envBody = [IO.File]::ReadAllText($script:envFile)
+foreach ($credential in @(
+  @{ Name = 'CREDS_KEY'; Pattern = '^[0-9a-fA-F]{64}$'; Expected = '64 hexadecimal characters (32 bytes)' },
+  @{ Name = 'CREDS_IV'; Pattern = '^[0-9a-fA-F]{32}$'; Expected = '32 hexadecimal characters (16 bytes)' }
+)) {
+  $linePattern = '(?m)^' + [regex]::Escape($credential.Name) + '=(.*)$'
+  $match = [regex]::Match($envBody, $linePattern)
+  $value = if ($match.Success) { $match.Groups[1].Value.Trim() } else { '' }
+  if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+    $value = $value.Substring(1, $value.Length - 2)
+  }
+  if (-not [regex]::IsMatch($value, $credential.Pattern)) {
+    throw (
+      'The existing ' + $credential.Name + ' must contain ' + $credential.Expected + '. ' +
+      'It was not overwritten automatically because it may protect existing encrypted data. ' +
+      'Back up .env; restore the original key for existing data, or empty the variable only for a first install and rerun.'
+    )
   }
 }
 Set-DotEnv 'HOST' '127.0.0.1'
