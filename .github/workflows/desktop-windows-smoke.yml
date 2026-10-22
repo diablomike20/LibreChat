@@ -1,0 +1,158 @@
+name: LibreChat Desktop Windows smoke
+
+on:
+  push:
+    branches:
+      - feature/windows-desktop-dockerless-poc
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-windows-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: librechat-desktop-windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node 24 (repo packageManager pins npm 11.13.0)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify LibreChat Node and npm versions
+        run: |
+          $nodeVersion = (node --version).Trim()
+          $npmVersion = (npm --version).Trim()
+          if ($nodeVersion -ne 'v24.16.0') { throw "Unexpected Node.js version: $nodeVersion" }
+          if ($npmVersion -ne '11.13.0') { throw "Unexpected npm version: $npmVersion" }
+          Write-Host "Verified Node.js $nodeVersion and npm $npmVersion."
+      - name: Parse PowerShell installers without running them
+        run: |
+          $files = @(
+            'desktop/windows/Install.ps1',
+            'desktop/windows/QuickInstall.ps1',
+            'desktop/windows/Diagnosztika.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file).Path, [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              throw "PowerShell syntax error: $file"
+            }
+          }
+      - name: Test desktop control logic
+        run: node --test desktop/runtime.test.cjs
+      - name: Prepare isolated installer profile
+        run: |
+          $ciLocal = Join-Path $env:RUNNER_TEMP 'LibreChatDesktop-E2E'
+          if (Test-Path $ciLocal) { Remove-Item -Recurse -Force $ciLocal }
+          New-Item -ItemType Directory -Force -Path $ciLocal | Out-Null
+          "LOCALAPPDATA=$ciLocal" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Remove-Item '.env' -Force -ErrorAction SilentlyContinue
+      - name: Run the actual QuickInstall bootstrap
+        timeout-minutes: 20
+        run: |
+          & 'desktop/windows/QuickInstall.ps1'
+          if (-not $?) { throw 'LibreChat Desktop installer failed.' }
+          $appRoot = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop'
+          if (-not (Test-Path (Join-Path $appRoot 'runtime/node/node.exe'))) {
+            throw 'Installer did not provision the portable Node.js runtime.'
+          }
+          if (-not (Test-Path (Join-Path $appRoot 'LibreChat/client/dist/index.html'))) {
+            throw 'Installer did not build the LibreChat frontend.'
+          }
+          if (-not (Test-Path (Join-Path $appRoot 'LibreChat/desktop/node_modules/electron/dist/electron.exe'))) {
+            throw 'Installer did not provision the Electron executable.'
+          }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'LibreChat Desktop.lnk'
+          $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          $startMenuShortcut = Join-Path $startMenu 'LibreChat Desktop.lnk'
+          if (-not (Test-Path $desktopShortcut) -or -not (Test-Path $startMenuShortcut)) {
+            throw 'Installer did not create both the desktop and Start menu shortcuts.'
+          }
+          $envText = [IO.File]::ReadAllText((Join-Path $appRoot 'LibreChat/.env'))
+          foreach ($required in @(
+            @{ Name = 'CREDS_KEY'; Pattern = '^[0-9a-fA-F]{64}$' },
+            @{ Name = 'CREDS_IV'; Pattern = '^[0-9a-fA-F]{32}$' }
+          )) {
+            $linePattern = '(?m)^' + [regex]::Escape($required.Name) + '=(.*)$'
+            $match = [regex]::Match($envText, $linePattern)
+            if (-not $match.Success -or -not [regex]::IsMatch($match.Groups[1].Value.Trim(), $required.Pattern)) {
+              throw ("Installer wrote an invalid " + $required.Name + " value.")
+            }
+          }
+          Write-Host 'PASS: installer provisioned Node, Electron, frontend, and valid credential lengths.'
+      - name: Verify installed Electron readiness and graceful shutdown
+        timeout-minutes: 6
+        run: |
+          $appData = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/data'
+          $logDir = Join-Path $appData 'logs'
+          $pidFile = Join-Path $logDir 'electron.pid'
+          $desktopLog = Join-Path $logDir 'desktop.log'
+          $backendLog = Join-Path $logDir 'backend.log'
+          $deadline = (Get-Date).AddMinutes(4)
+          $pidSeenAt = $null
+          $proc = $null
+          $ready = $false
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path $pidFile) {
+              if ($null -eq $pidSeenAt) { $pidSeenAt = Get-Date }
+              $pidText = (Get-Content -LiteralPath $pidFile -Raw).Trim()
+              if ($pidText -match '^\d+$') {
+                try { $proc = Get-Process -Id ([int]$pidText) -ErrorAction Stop }
+                catch { $proc = $null }
+              }
+            }
+            if ((Test-Path $backendLog) -and (Select-String -Path $backendLog -Pattern 'START ERROR|Error:|ERR_' -Quiet)) {
+              Get-Content $backendLog -Tail 160
+              if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+              throw 'LibreChat backend logged a startup error.'
+            }
+            if ((Test-Path $desktopLog) -and (Select-String -Path $desktopLog -Pattern 'Kész' -Quiet)) {
+              if (-not $proc) {
+                Get-Content $desktopLog -Tail 100
+                throw 'Electron reported readiness but its main process is no longer running.'
+              }
+              $ready = $true
+              break
+            }
+            if ($pidSeenAt -and -not $proc -and ((Get-Date) - $pidSeenAt).TotalSeconds -gt 10) {
+              if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+              if (Test-Path $backendLog) { Get-Content $backendLog -Tail 160 }
+              throw 'Electron exited before LibreChat became ready.'
+            }
+            Start-Sleep -Seconds 3
+          }
+          if (-not $ready) {
+            if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 100 }
+            if (Test-Path $backendLog) { Get-Content $backendLog -Tail 160 }
+            throw 'Installed LibreChat did not reach the ready state within four minutes.'
+          }
+          Write-Host 'PASS: installer-launched Electron reached LibreChat /readyz.'
+          $null = $proc.CloseMainWindow()
+          if (-not $proc.WaitForExit(60000)) {
+            Stop-Process -Id $proc.Id -Force
+            throw 'Electron did not shut down cleanly after the E2E check.'
+          }
+      - name: MongoDB binary launch and persistence across restart
+        run: |
+          $appRoot = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/LibreChat'
+          $nodeExe = Join-Path $env:LOCALAPPDATA 'LibreChatDesktop/runtime/node/node.exe'
+          & $nodeExe (Join-Path $appRoot 'desktop/mongo.integration.test.cjs')
+          if ($LASTEXITCODE -ne 0) { throw 'MongoDB persistence integration test failed.' }

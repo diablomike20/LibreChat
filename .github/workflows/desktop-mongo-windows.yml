@@ -1,0 +1,34 @@
+name: LibreChat Desktop MongoDB persistence (Windows)
+
+on:
+  push:
+    branches:
+      - feature/windows-desktop-dockerless-poc
+    paths:
+      - 'desktop/mongo.integration.test.cjs'
+      - 'desktop/package.json'
+      - '.github/workflows/desktop-mongo-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mongo-persistence:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install MongoDB integration test dependencies (no full LibreChat build)
+        shell: pwsh
+        run: |
+          npm install --prefix desktop --omit=dev --no-audit --no-fund --workspaces=false
+          if ($LASTEXITCODE -ne 0) { throw 'desktop npm install failed' }
+      - name: Start MongoDB, persist document, restart, verify
+        shell: pwsh
+        run: |
+          node --test desktop/mongo.integration.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'MongoDB persistence test failed' }
