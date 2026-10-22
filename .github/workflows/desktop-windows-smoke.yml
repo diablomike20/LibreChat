@@ -107,8 +107,8 @@ jobs:
             'SESSION_COOKIE_SECURE'='false';
             'JWT_SECRET'=[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N');
             'JWT_REFRESH_SECRET'=[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N');
-            'CREDS_KEY'=[guid]::NewGuid().ToString('N');
-            'CREDS_IV'=[guid]::NewGuid().ToString('N').Substring(0,16)
+            'CREDS_KEY'=[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N');
+            'CREDS_IV'=[guid]::NewGuid().ToString('N')
           }
           foreach ($key in $vals.Keys) {
             $line = '(?m)^' + [regex]::Escape($key) + '=.*$'
