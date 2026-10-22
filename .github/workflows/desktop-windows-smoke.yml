@@ -31,11 +31,13 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Match LibreChat npm
+      - name: Verify LibreChat Node and npm versions
         run: |
-          npm install --global npm@11.13.0
-          node --version
-          npm --version
+          $nodeVersion = (node --version).Trim()
+          $npmVersion = (npm --version).Trim()
+          if ($nodeVersion -ne 'v24.16.0') { throw "Unexpected Node.js version: $nodeVersion" }
+          if ($npmVersion -ne '11.13.0') { throw "Unexpected npm version: $npmVersion" }
+          Write-Host "Verified Node.js $nodeVersion and npm $npmVersion."
       - name: Parse PowerShell installers without running them
         run: |
           $files = @(
